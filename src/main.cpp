@@ -11,7 +11,7 @@
 const char* TITLE = "GK1P4";
 
 // =====================================================================
-//   SHADERY (można też trzymać w osobnych plikach .vert / .frag)
+//   SHADERY 
 // =====================================================================
 const char* vertexShaderSource = R"(
 #version 330 core
@@ -19,14 +19,29 @@ layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aColor;
 
 out vec3 ourColor;
+out vec3 worldPos;
+out vec3 worldNormal;
 
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
 
+uniform float time;           
+uniform float baseScale;
+
 void main()
 {
-    gl_Position = projection * view * model * vec4(aPos, 1.0);
+    // PULSOWANIE
+    float pulse = 1.0f + 0.3f * sin(time * 2.0f);
+    float scale = baseScale * pulse; 
+    vec3 scaledPos = aPos * scale;
+
+    vec4 world = model * vec4(scaledPos, 1.0);
+    gl_Position = projection * view * world;
+
+    worldPos = world.xyz;
+    worldNormal = normalize(mat3(transpose(inverse(model))) * aPos); 
+
     ourColor = aColor;
 }
 )";
@@ -35,10 +50,32 @@ const char* fragmentShaderSource = R"(
 #version 330 core
 out vec4 FragColor;
 in vec3 ourColor;
+in vec3 worldPos;
+in vec3 worldNormal;
+
+uniform vec3 cameraPos;
+
+uniform float time;
+uniform float alpha;
+uniform float fresnelPower;
 
 void main()
 {
-    FragColor = vec4(ourColor, 1.0);
+    // ZMIANA KOLORU W CZASIE
+    vec3 color = ourColor + 0.5 * sin(0.5 * time + vec3(0.0, 2.0, 4.0)); 
+
+    vec3 view = normalize(cameraPos - worldPos);
+    vec3 norm = normalize(worldNormal);
+
+    float NdotV = min(max(dot(norm, view), 0.0), 1.0);
+    float fresnel = 1.0 - NdotV;
+
+    fresnel = pow(fresnel, fresnelPower);
+
+    color += vec3(0.5, 0.5, 0.5) * fresnel;  
+    float finalAlpha = alpha + 0.5 * fresnel;           
+
+    FragColor = vec4(color, finalAlpha);
 }
 )";
 
@@ -102,7 +139,7 @@ unsigned int createShaderProgram()
 //   DANE GEOMETRII – regularny czworościan
 // =====================================================================
 float vertices[] = {
-    // pozycja             // kolor
+    // pozycja              // kolor
      1.0f,  1.0f,  1.0f,    1.0f, 0.0f, 0.0f,   // 0 czerwony
     -1.0f, -1.0f,  1.0f,    0.0f, 1.0f, 0.0f,   // 1 zielony
     -1.0f,  1.0f, -1.0f,    0.0f, 0.0f, 1.0f,   // 2 niebieski
@@ -124,10 +161,6 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-#ifdef __APPLE__
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-#endif
-
     GLFWwindow* window = glfwCreateWindow(1200, 900, TITLE, nullptr, nullptr);
     if (!window)
     {
@@ -144,11 +177,15 @@ int main()
         return -1;
     }
 
-    // Opcjonalnie – wypisz wersję OpenGL (bezpieczniej niż stare makra GLAD_*)
+    // Wypisanie wersji OpenGL
     int major, minor;
     glGetIntegerv(GL_MAJOR_VERSION, &major);
     glGetIntegerv(GL_MINOR_VERSION, &minor);
     std::cout << "Załadowano OpenGL " << major << "." << minor << std::endl;
+
+    // WŁĄCZENIE BLENDINGU
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     // ==================== Kompilacja i linkowanie shaderów ====================
     unsigned int shaderProgram = createShaderProgram();
@@ -174,8 +211,6 @@ int main()
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    glBindVertexArray(0);  // odpinamy VAO
-
     // ==================== Ustawienia OpenGL ====================
     glEnable(GL_DEPTH_TEST);
 
@@ -189,11 +224,17 @@ int main()
 
         glUseProgram(shaderProgram);
 
+        float time = (float)glfwGetTime();
+        
+        // Przekazanie czasu do shaderów
+        glUniform1f(glGetUniformLocation(shaderProgram, "time"), time);
+
         // Macierze
         glm::mat4 model = glm::mat4(1.0f);
-        float time = (float)glfwGetTime();
         model = glm::rotate(model, time * 0.8f, glm::vec3(0.0f, 1.0f, 0.0f));
         model = glm::rotate(model, time * 0.4f, glm::vec3(1.0f, 0.0f, 0.0f));
+
+        glm::vec3 cameraPosition = glm::vec3(0.0f, 0.0f, 5.0f);
 
         glm::mat4 view = glm::lookAt(
             glm::vec3(0.0f, 0.0f, 5.0f),   // kamera
@@ -210,12 +251,38 @@ int main()
         );
 
         // Przekazanie macierzy do shadera
-        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"),      1, GL_FALSE, glm::value_ptr(model));
-        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"),       1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+        glUniform3fv(glGetUniformLocation(shaderProgram, "cameraPos"), 1, glm::value_ptr(cameraPosition));
 
-        // Rysowanie
-        glBindVertexArray(VAO);
+        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(model));
+       
+        // ============================
+        // 1. Wewnętrzny czworościan
+        // ============================
+        glUniform1f(glGetUniformLocation(shaderProgram, "baseScale"), 1.0f);
+        glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 1.0f);
+        glUniform1f(glGetUniformLocation(shaderProgram, "fresnelPower"), 2.0f);
+
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
+        glFrontFace(GL_CW);
+    
+        glDrawElements(GL_TRIANGLES, 12, GL_UNSIGNED_INT, 0);
+    
+        // ============================
+        // 2. Zewnętrzna skorupa 
+        // ============================
+        glUniform1f(glGetUniformLocation(shaderProgram, "baseScale"), 1.20f); 
+        glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 0.1f); 
+        glUniform1f(glGetUniformLocation(shaderProgram, "fresnelPower"), 3.0f);
+
+        glEnable(GL_CULL_FACE);
+        // glCullFace(GL_FRONT);
+        glCullFace(GL_BACK);
+        glFrontFace(GL_CCW);
+        // glFrontFace(GL_CW);
+
         glDrawElements(GL_TRIANGLES, 12, GL_UNSIGNED_INT, 0);
 
         glfwSwapBuffers(window);
