@@ -1,4 +1,4 @@
-#include <glad/gl.h>
+#include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
 #include <glm/glm.hpp>
@@ -7,6 +7,8 @@
 
 #include <iostream>
 #include <string>
+
+const char* TITLE = "GK1P4";
 
 // =====================================================================
 //   SHADERY (można też trzymać w osobnych plikach .vert / .frag)
@@ -126,7 +128,7 @@ int main()
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-    GLFWwindow* window = glfwCreateWindow(1200, 900, "Czworościan OpenGL", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(1200, 900, TITLE, nullptr, nullptr);
     if (!window)
     {
         std::cerr << "Nie udało się utworzyć okna GLFW" << std::endl;
@@ -137,17 +139,16 @@ int main()
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
-    int version = gladLoadGL(glfwGetProcAddress);
-    if (version == 0)
-    {
+    if (!gladLoadGL()) {
         std::cerr << "Nie udało się zainicjalizować GLAD / OpenGL" << std::endl;
         return -1;
     }
 
-    std::cout << "Załadowano OpenGL " 
-              << GLAD_VERSION_MAJOR(version) << "." 
-              << GLAD_VERSION_MINOR(version) << std::endl;
-
+    // Opcjonalnie – wypisz wersję OpenGL (bezpieczniej niż stare makra GLAD_*)
+    int major, minor;
+    glGetIntegerv(GL_MAJOR_VERSION, &major);
+    glGetIntegerv(GL_MINOR_VERSION, &minor);
+    std::cout << "Załadowano OpenGL " << major << "." << minor << std::endl;
 
     // ==================== Kompilacja i linkowanie shaderów ====================
     unsigned int shaderProgram = createShaderProgram();
