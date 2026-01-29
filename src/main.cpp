@@ -12,7 +12,7 @@
 
 #define M_PI 3.14159265358979323846
 
-const char* TITLE = "GK1P4 - Faza 3: Oświetlenie Phonga";
+const char* TITLE = "GK1P4 - Faza 3: Oświetlenie Phonga (Global Ambient)";
 
 // =====================================================================
 //   GLOBALNE ZMIENNE DLA KAMER
@@ -32,13 +32,12 @@ struct Mesh {
 };
 
 // =====================================================================
-//   STRUKTURA LIGHT - źródło światła
+//   STRUKTURA LIGHT - źródło światła punktowego
 // =====================================================================
 struct Light {
     glm::vec3 position;
-    glm::vec3 ambient;
-    glm::vec3 diffuse;
-    glm::vec3 specular;
+    glm::vec3 diffuse;   // IL - kolor/intensywność światła
+    glm::vec3 specular;  // IL - kolor/intensywność dla specular
 
     // Parametry zanikania (attenuation)
     float constant;
@@ -47,13 +46,11 @@ struct Light {
 
     Light(glm::vec3 pos, glm::vec3 col)
         : position(pos),
-        ambient(col * 0.2f),
         diffuse(col),
-        specular(col),
-        //specular(glm::vec3(1.0f)),
+        specular(glm::vec3(1.0f)),
         constant(1.0f),
-        linear(0.09f),
-        quadratic(0.032f)
+        linear(0.10f),
+        quadratic(0.035f)
     {
     }
 };
@@ -100,15 +97,17 @@ uniform float kd;        // Współczynnik diffuse (0-1)
 uniform float ks;        // Współczynnik specular (0-1)
 uniform float shininess; // m - wykładnik (1-128)
 
+// Globalne światło ambient (niezależne od świateł punktowych)
+uniform vec3 globalAmbient;
+
 // Maksymalnie 4 światła
 #define MAX_LIGHTS 4
 uniform int numLights;
 
 struct Light {
     vec3 position;
-    vec3 ambient;
-    vec3 diffuse;
-    vec3 specular;
+    vec3 diffuse;   // IL - kolor/intensywność światła
+    vec3 specular;  // IL - kolor/intensywność dla specular
     
     float constant;
     float linear;
@@ -120,9 +119,6 @@ uniform Light lights[MAX_LIGHTS];
 vec3 calculatePointLight(Light light, vec3 normal, vec3 fragPos, vec3 viewDir, vec3 objectColor)
 {
     vec3 lightDir = normalize(light.position - fragPos);
-    
-    // Ambient
-    vec3 ambient = light.ambient * objectColor;
     
     // Diffuse: kd * IL * IO * (N·L)
     float diff = max(dot(normal, lightDir), 0.0);
@@ -137,11 +133,10 @@ vec3 calculatePointLight(Light light, vec3 normal, vec3 fragPos, vec3 viewDir, v
     float distance = length(light.position - fragPos);
     float attenuation = 1.0 / (light.constant + light.linear * distance + light.quadratic * (distance * distance));
     
-    ambient *= attenuation;
     diffuse *= attenuation;
     specular *= attenuation;
     
-    return ambient + diffuse + specular;
+    return diffuse + specular;  // BEZ ambient!
 }
 
 void main()
@@ -149,13 +144,18 @@ void main()
     vec3 norm = normalize(Normal);
     vec3 viewDir = normalize(viewPos - FragPos);
     
-    vec3 result = vec3(0.0);
+    // Globalne światło ambient (raz dla całej sceny)
+    vec3 ambient = globalAmbient * Color;
     
-    // Oblicz wkład każdego światła
+    // Suma wszystkich świateł punktowych (diffuse + specular)
+    vec3 result = vec3(0.0);
     for(int i = 0; i < numLights; i++)
     {
         result += calculatePointLight(lights[i], norm, FragPos, viewDir, Color);
     }
+    
+    // Dodaj ambient na koniec (raz!)
+    result += ambient;
     
     FragColor = vec4(result, 1.0);
 }
@@ -290,9 +290,9 @@ Mesh createCube()
         0, 1, 2,  2, 3, 0,      // Przód
         4, 6, 5,  6, 4, 7,      // Tył
         8, 9, 10, 10, 11, 8,    // Góra
-        12, 14, 13, 14, 12, 15, // Dół
-        16, 17, 18, 18, 19, 16, // Prawa
-        20, 22, 21, 22, 20, 23  // Lewa
+        12, 14, 13, 12, 15, 14, // Dół
+        16, 18, 17, 16, 19, 18, // Prawa
+        20, 21, 22, 20, 22, 23  // Lewa
     };
 
     Mesh mesh;
@@ -337,8 +337,8 @@ Mesh createPlane()
     };
 
     unsigned int indices[] = {
-        0, 1, 2,
-        2, 3, 0
+        0, 2, 1,
+        2, 0, 3
     };
 
     Mesh mesh;
@@ -420,12 +420,12 @@ Mesh createSphere(int stacks = 30, int slices = 30)
 
             // Pierwszy trójkąt
             indices.push_back(first);
-            indices.push_back(second);
             indices.push_back(first + 1);
+            indices.push_back(second);
 
             // Drugi trójkąt
-            indices.push_back(second);
             indices.push_back(second + 1);
+            indices.push_back(second);
             indices.push_back(first + 1);
         }
     }
@@ -476,7 +476,6 @@ void setLights(unsigned int shaderProgram, const std::vector<Light>& lights)
         std::string base = "lights[" + std::to_string(i) + "]";
 
         glUniform3fv(glGetUniformLocation(shaderProgram, (base + ".position").c_str()), 1, glm::value_ptr(lights[i].position));
-        glUniform3fv(glGetUniformLocation(shaderProgram, (base + ".ambient").c_str()), 1, glm::value_ptr(lights[i].ambient));
         glUniform3fv(glGetUniformLocation(shaderProgram, (base + ".diffuse").c_str()), 1, glm::value_ptr(lights[i].diffuse));
         glUniform3fv(glGetUniformLocation(shaderProgram, (base + ".specular").c_str()), 1, glm::value_ptr(lights[i].specular));
 
@@ -547,14 +546,17 @@ int main()
     lights.push_back(Light(glm::vec3(5.0f, 3.0f, 5.0f), glm::vec3(1.0f, 0.3f, 0.3f)));
 
     // Światło 3: Niebieskie z drugiego boku
-    lights.push_back(Light(glm::vec3(-5.0f, 3.0f, -5.0f), glm::vec3(0.3f, 0.3f, 1.0f)));
+    lights.push_back(Light(glm::vec3(-1.0f, 3.0f, -2.0f), glm::vec3(0.3f, 0.3f, 1.0f)));
+
+    // Światło 4: W środku sceny
+    lights.push_back(Light(glm::vec3(0.0f, 0.1f, 0.0f), glm::vec3(0.5f, 0.5f, 0.5f)));
 
     std::cout << "\nDodano " << lights.size() << " świateł punktowych" << std::endl;
 
     // ==================== Ustawienia OpenGL ====================
     glEnable(GL_DEPTH_TEST);
     // Face culling wyłączony na razie - włączymy później jeśli będzie potrzebny
-    // glEnable(GL_CULL_FACE);
+     glEnable(GL_CULL_FACE);
 
     // ==================== Pętla główna ====================
     while (!glfwWindowShouldClose(window))
@@ -637,6 +639,10 @@ int main()
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
         glUniform3fv(glGetUniformLocation(shaderProgram, "viewPos"), 1, glm::value_ptr(cameraPosition));
 
+        // Globalne światło ambient (niezależne od liczby świateł punktowych)
+        glm::vec3 globalAmbient = glm::vec3(0.2f, 0.2f, 0.2f);  // Słaby ambient
+        glUniform3fv(glGetUniformLocation(shaderProgram, "globalAmbient"), 1, glm::value_ptr(globalAmbient));
+
         // Przekazanie świateł
         setLights(shaderProgram, lights);
 
@@ -651,7 +657,7 @@ int main()
         modelFloor = glm::translate(modelFloor, glm::vec3(0.0f, -2.0f, 0.0f));
         drawMesh(planeMesh, shaderProgram, modelFloor);
 
-        // 2. KULA (statyczna, gładki obiekt) - bardzo błyszcząca, jak metal
+        // 2. KULA (statyczna, gładki obiekt) - bardzo błyszcząca, metaliczna
         glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.6f);         // Średni diffuse
         glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.9f);         // Dużo specular!
         glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 128.0f); // Wysoki wykładnik (ostry odblask)
@@ -662,9 +668,9 @@ int main()
         drawMesh(sphereMesh, shaderProgram, modelSphere);
 
         // 3. SZEŚCIAN STATYCZNY #1 - plastikowy
-        glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.7f);
-        glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.5f);
-        glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 32.0f);
+        glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.6f);
+        glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.9f);
+        glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 128.0f);
 
         glm::mat4 modelCube1 = glm::mat4(1.0f);
         modelCube1 = glm::translate(modelCube1, glm::vec3(3.0f, 0.5f, -2.0f));
