@@ -18,6 +18,7 @@ const char* TITLE = "GK1P4 - Faza 3: Oświetlenie Phonga (Global Ambient)";
 //   GLOBALNE ZMIENNE DLA KAMER
 // =====================================================================
 int activeCamera = 0; // 0 = obserwująca, 1 = śledząca, 2 = TPP
+int projectionType = 0; // 0 - perspektywiczna, 1 - ortograficzna
 
 // =====================================================================
 //   STRUKTURA MESH - przechowuje geometrię obiektu
@@ -193,6 +194,16 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         {
             activeCamera = 2;
             std::cout << "Kamera: TPP (Third Person - podąża za obiektem)" << std::endl;
+        }
+        else if (key == GLFW_KEY_P)
+        {
+            projectionType = 0;
+            std::cout << "Rzutowanie: PERSPEKTYWICZNE" << std::endl;
+        }
+        else if (key == GLFW_KEY_O)
+        {
+            projectionType = 1;
+            std::cout << "Rzutowanie: ORTOGONALNE" << std::endl;
         }
     }
 }
@@ -628,11 +639,24 @@ int main()
         // Rzutowanie perspektywiczne
         int width, height;
         glfwGetFramebufferSize(window, &width, &height);
-        glm::mat4 projection = glm::perspective(
-            glm::radians(45.0f),
-            (float)width / (float)height,
-            0.1f, 100.0f
-        );
+
+        glm::mat4 projection;
+        if (projectionType == 0) {
+            projection = glm::perspective(
+                glm::radians(45.0f),
+                (float)width / (float)height,
+                0.1f, 100.0f
+            );
+        }
+        else if (projectionType == 1) {
+            projection = glm::ortho(
+                -10.0f, 10.0f,
+                -10.0f, 10.0f,
+                0.1f, 100.0f
+            );
+        }
+
+
 
         // ==================== PRZEKAZANIE UNIFORMÓW ====================
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
