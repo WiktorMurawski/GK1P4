@@ -754,6 +754,7 @@ int main()
 
         glm::vec3 fogColor = glm::vec3(0.1f, 0.2f, 0.3f);
 
+        glStencilMask(0xFF);
         glClearColor(skyColor.r, skyColor.g, skyColor.b, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
@@ -897,92 +898,9 @@ int main()
         mirrorModel = glm::rotate(mirrorModel, time * 0.8f, glm::vec3(0.0f, 1.0f, 0.0f));
         mirrorModel = glm::scale(mirrorModel, glm::vec3(1.5f, 1.5f, 0.1f));
 
-        if (mirrorEnabled)
-        {
-            // PASS 1: Stencil
-            glStencilFunc(GL_ALWAYS, 1, 0xFF);
-            glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-            glStencilMask(0xFF);
-            glDepthMask(GL_FALSE);
-            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-
-            glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 1.0f);
-            drawMesh(mirrorMesh, shaderProgram, mirrorModel);
-
-            // NEW: Clear depth buffer ONLY in the mirror region (where stencil == 1)
-            glStencilFunc(GL_EQUAL, 1, 0xFF);
-            glStencilMask(0x00);  // Don't modify stencil
-            glDepthMask(GL_TRUE);  // Allow depth writes
-            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);  // Don't modify color
-
-            glClear(GL_DEPTH_BUFFER_BIT);
-
-            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);  // Re-enable color writes
-
-            // PASS 2: Reflection
-            glStencilFunc(GL_EQUAL, 1, 0xFF);
-            glStencilMask(0x00);
-            glDepthMask(GL_TRUE);
-            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-
-            glm::mat4 reflectionMatrix = glm::mat4(1.0f);
-            reflectionMatrix = glm::translate(reflectionMatrix, movingObjPosition);
-            reflectionMatrix = glm::rotate(reflectionMatrix, time * 0.8f, glm::vec3(0.0f, 1.0f, 0.0f));
-            reflectionMatrix = glm::scale(reflectionMatrix, glm::vec3(1.0f, 1.0f, -1.0f));
-            reflectionMatrix = glm::rotate(reflectionMatrix, -time * 0.8f, glm::vec3(0.0f, 1.0f, 0.0f));
-            reflectionMatrix = glm::translate(reflectionMatrix, -movingObjPosition);
-
-            glCullFace(GL_FRONT);
-            glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 1.0f);
-
-            glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.8f);
-            glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.1f);
-            glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 1.0f);
-            drawMesh(planeMesh, shaderProgram, reflectionMatrix * glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -2.0f, 0.0f)));
-
-            glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.6f);
-            glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.9f);
-            glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 128.0f);
-            glm::mat4 ms = reflectionMatrix * glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 0.5f, 0.0f));
-            drawMesh(sphereMesh, shaderProgram, glm::scale(ms, glm::vec3(1.5f)));
-
-            glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.6f);
-            glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.9f);
-            glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 128.0f);
-            glm::mat4 mc1 = reflectionMatrix * glm::translate(glm::mat4(1.0f), glm::vec3(3.0f, 0.5f, -2.0f));
-            drawMesh(cubeMesh, shaderProgram, glm::rotate(mc1, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f)));
-
-            glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.9f);
-            glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.05f);
-            glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 5.0f);
-            glm::mat4 mc2 = reflectionMatrix * glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.5f, -4.0f));
-            drawMesh(cubeMesh, shaderProgram, glm::scale(mc2, glm::vec3(0.8f, 1.5f, 0.8f)));
-
-            glCullFace(GL_BACK);
-
-            // PASS 3: Mirror surface
-            glStencilFunc(GL_ALWAYS, 0, 0xFF);
-            glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);  // ADD THIS LINE
-            glStencilMask(0xFF);  // CHANGE from 0x00 to 0xFF
-
-            //glDepthFunc(GL_ALWAYS);  // ADD THIS - always pass depth test
-            //glDepthMask(GL_FALSE);   // ADD THIS - but don't write to depth buffer
-
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-            glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.3f);
-            glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.9f);
-            glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 128.0f);
-            glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 0.3f);
-            drawMesh(mirrorMesh, shaderProgram, mirrorModel);
-
-            glDisable(GL_BLEND);
-        }
-
-        // PASS 4: Normal scene
+        // ====== FIRST: Draw the normal scene (everything EXCEPT the moving cube) ======
         glStencilFunc(GL_ALWAYS, 0, 0xFF);
-        glStencilMask(0x00);
+        glStencilMask(0x00);  // Don't write to stencil
         glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 1.0f);
 
         // 1. PODŁOGA (statyczna)
@@ -1024,7 +942,82 @@ int main()
         modelCube2 = glm::scale(modelCube2, glm::vec3(0.8f, 1.5f, 0.8f));
         drawMesh(cubeMesh, shaderProgram, modelCube2);
 
-        // 5. SZEŚCIAN RUCHOMY
+        // ====== NOW: Handle the mirror (if enabled) ======
+        if (mirrorEnabled)
+        {
+            // PASS 1: Mark stencil where mirror is
+            glStencilFunc(GL_ALWAYS, 1, 0xFF);
+            glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+            glStencilMask(0xFF);
+            glDepthMask(GL_FALSE);
+            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+
+            glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 1.0f);
+            drawMesh(mirrorMesh, shaderProgram, mirrorModel);
+
+            // PASS 2: Draw reflection where stencil == 1
+            glStencilFunc(GL_EQUAL, 1, 0xFF);
+            glStencilMask(0x00);
+            glDepthMask(GL_TRUE);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+            glm::mat4 reflectionMatrix = glm::mat4(1.0f);
+            reflectionMatrix = glm::translate(reflectionMatrix, movingObjPosition);
+            reflectionMatrix = glm::rotate(reflectionMatrix, time * 0.8f, glm::vec3(0.0f, 1.0f, 0.0f));
+            reflectionMatrix = glm::scale(reflectionMatrix, glm::vec3(1.0f, 1.0f, -1.0f));
+            reflectionMatrix = glm::rotate(reflectionMatrix, -time * 0.8f, glm::vec3(0.0f, 1.0f, 0.0f));
+            reflectionMatrix = glm::translate(reflectionMatrix, -movingObjPosition);
+
+            glCullFace(GL_FRONT);
+            glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 1.0f);
+
+            glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.8f);
+            glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.1f);
+            glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 1.0f);
+            drawMesh(planeMesh, shaderProgram, reflectionMatrix * glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -2.0f, 0.0f)));
+
+            glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.6f);
+            glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.9f);
+            glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 128.0f);
+            glm::mat4 ms = reflectionMatrix * glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 0.5f, 0.0f));
+            drawMesh(sphereMesh, shaderProgram, glm::scale(ms, glm::vec3(1.5f)));
+
+            glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.6f);
+            glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.9f);
+            glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 128.0f);
+            glm::mat4 mc1 = reflectionMatrix * glm::translate(glm::mat4(1.0f), glm::vec3(3.0f, 0.5f, -2.0f));
+            drawMesh(cubeMesh, shaderProgram, glm::rotate(mc1, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f)));
+
+            glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.9f);
+            glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.05f);
+            glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 5.0f);
+            glm::mat4 mc2 = reflectionMatrix * glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.5f, -4.0f));
+            drawMesh(cubeMesh, shaderProgram, glm::scale(mc2, glm::vec3(0.8f, 1.5f, 0.8f)));
+
+            glCullFace(GL_BACK);
+
+            // PASS 3: Draw mirror surface (with blending)
+            glStencilFunc(GL_EQUAL, 1, 0xFF);  // Only draw where stencil == 1
+            glStencilMask(0x00);  // Don't modify stencil anymore
+
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.3f);
+            glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.9f);
+            glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 128.0f);
+            glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 0.3f);
+            drawMesh(mirrorMesh, shaderProgram, mirrorModel);
+
+            glDisable(GL_BLEND);
+        }
+
+        // ====== FINALLY: Draw the moving cube (which has the mirror on it) ======
+        glStencilFunc(GL_ALWAYS, 0, 0xFF);
+        glStencilMask(0x00);
+        glDepthMask(GL_TRUE);
+        glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 1.0f);
+
         glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.7f);
         glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.6f);
         glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 64.0f);
