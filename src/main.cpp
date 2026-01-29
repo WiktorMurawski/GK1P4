@@ -7,11 +7,12 @@
 
 #include <iostream>
 #include <vector>
+#include <string>
 #include <cmath>
 
 #define M_PI 3.14159265358979323846
 
-const char* TITLE = "GK1P4 - Faza 2: Kamery";
+const char* TITLE = "GK1P4 - Faza 3: Oświetlenie Phonga";
 
 // =====================================================================
 //   GLOBALNE ZMIENNE DLA KAMER
@@ -31,14 +32,44 @@ struct Mesh {
 };
 
 // =====================================================================
-//   SHADERY (na razie proste, rozbudujemy w Fazie 3)
+//   STRUKTURA LIGHT - źródło światła
+// =====================================================================
+struct Light {
+    glm::vec3 position;
+    glm::vec3 ambient;
+    glm::vec3 diffuse;
+    glm::vec3 specular;
+
+    // Parametry zanikania (attenuation)
+    float constant;
+    float linear;
+    float quadratic;
+
+    Light(glm::vec3 pos, glm::vec3 col)
+        : position(pos),
+        ambient(col * 0.2f),
+        diffuse(col),
+        specular(col),
+        //specular(glm::vec3(1.0f)),
+        constant(1.0f),
+        linear(0.09f),
+        quadratic(0.032f)
+    {
+    }
+};
+
+// =====================================================================
+//   SHADERY PHONGA
 // =====================================================================
 const char* vertexShaderSource = R"(
 #version 330 core
 layout (location = 0) in vec3 aPos;
-layout (location = 1) in vec3 aColor;
+layout (location = 1) in vec3 aNormal;
+layout (location = 2) in vec3 aColor;
 
-out vec3 ourColor;
+out vec3 FragPos;
+out vec3 Normal;
+out vec3 Color;
 
 uniform mat4 model;
 uniform mat4 view;
@@ -46,19 +77,87 @@ uniform mat4 projection;
 
 void main()
 {
-    gl_Position = projection * view * model * vec4(aPos, 1.0);
-    ourColor = aColor;
+    FragPos = vec3(model * vec4(aPos, 1.0));
+    // Poprawna transformacja normali (transpose inverse)
+    Normal = mat3(transpose(inverse(model))) * aNormal;
+    Color = aColor;
+    
+    gl_Position = projection * view * vec4(FragPos, 1.0);
 }
 )";
 
 const char* fragmentShaderSource = R"(
 #version 330 core
 out vec4 FragColor;
-in vec3 ourColor;
+
+in vec3 FragPos;
+in vec3 Normal;
+in vec3 Color;
+
+// Właściwości materiału
+uniform vec3 viewPos;
+uniform float kd;        // Współczynnik diffuse (0-1)
+uniform float ks;        // Współczynnik specular (0-1)
+uniform float shininess; // m - wykładnik (1-128)
+
+// Maksymalnie 4 światła
+#define MAX_LIGHTS 4
+uniform int numLights;
+
+struct Light {
+    vec3 position;
+    vec3 ambient;
+    vec3 diffuse;
+    vec3 specular;
+    
+    float constant;
+    float linear;
+    float quadratic;
+};
+
+uniform Light lights[MAX_LIGHTS];
+
+vec3 calculatePointLight(Light light, vec3 normal, vec3 fragPos, vec3 viewDir, vec3 objectColor)
+{
+    vec3 lightDir = normalize(light.position - fragPos);
+    
+    // Ambient
+    vec3 ambient = light.ambient * objectColor;
+    
+    // Diffuse: kd * IL * IO * (N·L)
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec3 diffuse = kd * light.diffuse * diff * objectColor;
+    
+    // Specular: ks * IL * IO * (R·V)^m
+    vec3 reflectDir = reflect(-lightDir, normal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);
+    vec3 specular = ks * light.specular * spec * objectColor;
+    
+    // Zanikanie (attenuation)
+    float distance = length(light.position - fragPos);
+    float attenuation = 1.0 / (light.constant + light.linear * distance + light.quadratic * (distance * distance));
+    
+    ambient *= attenuation;
+    diffuse *= attenuation;
+    specular *= attenuation;
+    
+    return ambient + diffuse + specular;
+}
 
 void main()
 {
-    FragColor = vec4(ourColor, 1.0);
+    vec3 norm = normalize(Normal);
+    vec3 viewDir = normalize(viewPos - FragPos);
+    
+    vec3 result = vec3(0.0);
+    
+    // Oblicz wkład każdego światła
+    for(int i = 0; i < numLights; i++)
+    {
+        result += calculatePointLight(lights[i], norm, FragPos, viewDir, Color);
+    }
+    
+    FragColor = vec4(result, 1.0);
 }
 )";
 
@@ -141,49 +240,50 @@ unsigned int createShaderProgram()
 }
 
 // =====================================================================
-//   GENEROWANIE GEOMETRII
+//   GENEROWANIE GEOMETRII Z NORMALAMI
 // =====================================================================
 
-// Tworzy sześcian (cube)
+// Tworzy sześcian z poprawnymi normalami (każda ściana ma własne wierzchołki)
 Mesh createCube()
 {
-    // Wierzchołki sześcianu z kolorami (pozycja XYZ, kolor RGB)
+    // Każda ściana ma 4 wierzchołki (pozycja XYZ, normalna XYZ, kolor RGB)
     float vertices[] = {
-        // Przód (czerwony)
-        -0.5f, -0.5f,  0.5f,   1.0f, 0.0f, 0.0f,
-         0.5f, -0.5f,  0.5f,   1.0f, 0.0f, 0.0f,
-         0.5f,  0.5f,  0.5f,   1.0f, 0.0f, 0.0f,
-        -0.5f,  0.5f,  0.5f,   1.0f, 0.0f, 0.0f,
+        // Pozycja           Normalna          Kolor
+        // Przód (+Z) - czerwony
+        -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 0.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 0.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 0.0f, 0.0f,
 
-        // Tył (zielony)
-        -0.5f, -0.5f, -0.5f,   0.0f, 1.0f, 0.0f,
-         0.5f, -0.5f, -0.5f,   0.0f, 1.0f, 0.0f,
-         0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 0.0f,
-        -0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 0.0f,
+        // Tył (-Z) - zielony
+        -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 1.0f, 0.0f,
 
-        // Góra (niebieski)
-        -0.5f,  0.5f, -0.5f,   0.0f, 0.0f, 1.0f,
-        -0.5f,  0.5f,  0.5f,   0.0f, 0.0f, 1.0f,
-         0.5f,  0.5f,  0.5f,   0.0f, 0.0f, 1.0f,
-         0.5f,  0.5f, -0.5f,   0.0f, 0.0f, 1.0f,
+        // Góra (+Y) - niebieski
+        -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 0.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 0.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 0.0f, 1.0f,
 
-        // Dół (żółty)
-        -0.5f, -0.5f, -0.5f,   1.0f, 1.0f, 0.0f,
-        -0.5f, -0.5f,  0.5f,   1.0f, 1.0f, 0.0f,
-         0.5f, -0.5f,  0.5f,   1.0f, 1.0f, 0.0f,
-         0.5f, -0.5f, -0.5f,   1.0f, 1.0f, 0.0f,
+         // Dół (-Y) - żółty
+         -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f, 0.0f,
+         -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f, 0.0f,
+          0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f, 0.0f,
+          0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f, 0.0f,
 
-        // Prawa (cyjan)
-         0.5f, -0.5f, -0.5f,   0.0f, 1.0f, 1.0f,
-         0.5f, -0.5f,  0.5f,   0.0f, 1.0f, 1.0f,
-         0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 1.0f,
-         0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 1.0f,
+          // Prawa (+X) - cyjan
+           0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f, 1.0f,
+           0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f, 1.0f,
+           0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f, 1.0f,
+           0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f, 1.0f,
 
-        // Lewa (magenta)
-        -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 1.0f,
-        -0.5f, -0.5f,  0.5f,   1.0f, 0.0f, 1.0f,
-        -0.5f,  0.5f,  0.5f,   1.0f, 0.0f, 1.0f,
-        -0.5f,  0.5f, -0.5f,   1.0f, 0.0f, 1.0f
+           // Lewa (-X) - magenta
+           -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f, 1.0f,
+           -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f, 1.0f,
+           -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f, 1.0f,
+           -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f, 1.0f
     };
 
     unsigned int indices[] = {
@@ -211,26 +311,29 @@ Mesh createCube()
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
     // Pozycja
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-    // Kolor
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    // Normalna
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
+    // Kolor
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
 
     glBindVertexArray(0);
 
     return mesh;
 }
 
-// Tworzy płaszczyznę (podłoga)
+// Tworzy płaszczyznę (podłoga) z normalną skierowaną w górę
 Mesh createPlane()
 {
     float vertices[] = {
-        // Pozycja              Kolor (szary)
-        -10.0f, 0.0f, -10.0f,   0.3f, 0.3f, 0.3f,
-         10.0f, 0.0f, -10.0f,   0.3f, 0.3f, 0.3f,
-         10.0f, 0.0f,  10.0f,   0.3f, 0.3f, 0.3f,
-        -10.0f, 0.0f,  10.0f,   0.3f, 0.3f, 0.3f
+        // Pozycja              Normalna           Kolor (szary)
+        -10.0f, 0.0f, -10.0f,   0.0f, 1.0f, 0.0f,  0.3f, 0.3f, 0.3f,
+         10.0f, 0.0f, -10.0f,   0.0f, 1.0f, 0.0f,  0.3f, 0.3f, 0.3f,
+         10.0f, 0.0f,  10.0f,   0.0f, 1.0f, 0.0f,  0.3f, 0.3f, 0.3f,
+        -10.0f, 0.0f,  10.0f,   0.0f, 1.0f, 0.0f,  0.3f, 0.3f, 0.3f
     };
 
     unsigned int indices[] = {
@@ -253,18 +356,20 @@ Mesh createPlane()
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
 
     glBindVertexArray(0);
 
     return mesh;
 }
 
-// Tworzy kulę metodą UV sphere
-Mesh createSphere(int stacks = 20, int slices = 20)
+// Tworzy kulę metodą UV sphere - normalna = pozycja (dla sfery jednostkowej)
+Mesh createSphere(int stacks = 30, int slices = 30)
 {
     std::vector<float> vertices;
     std::vector<unsigned int> indices;
@@ -283,6 +388,11 @@ Mesh createSphere(int stacks = 20, int slices = 20)
             float y = cos(phi);
             float z = sin(phi) * sin(theta);
 
+            // Normalna = znormalizowana pozycja
+            float nx = x;
+            float ny = y;
+            float nz = z;
+
             // Kolor zależny od pozycji (gradient)
             float r = (x + 1.0f) * 0.5f;
             float g = (y + 1.0f) * 0.5f;
@@ -291,6 +401,9 @@ Mesh createSphere(int stacks = 20, int slices = 20)
             vertices.push_back(x);
             vertices.push_back(y);
             vertices.push_back(z);
+            vertices.push_back(nx);
+            vertices.push_back(ny);
+            vertices.push_back(nz);
             vertices.push_back(r);
             vertices.push_back(g);
             vertices.push_back(b);
@@ -332,10 +445,12 @@ Mesh createSphere(int stacks = 20, int slices = 20)
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
 
     glBindVertexArray(0);
 
@@ -349,6 +464,26 @@ void drawMesh(const Mesh& mesh, unsigned int shaderProgram, const glm::mat4& mod
     glBindVertexArray(mesh.VAO);
     glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
+}
+
+// Funkcja przekazująca światła do shadera
+void setLights(unsigned int shaderProgram, const std::vector<Light>& lights)
+{
+    glUniform1i(glGetUniformLocation(shaderProgram, "numLights"), lights.size());
+
+    for (size_t i = 0; i < lights.size(); ++i)
+    {
+        std::string base = "lights[" + std::to_string(i) + "]";
+
+        glUniform3fv(glGetUniformLocation(shaderProgram, (base + ".position").c_str()), 1, glm::value_ptr(lights[i].position));
+        glUniform3fv(glGetUniformLocation(shaderProgram, (base + ".ambient").c_str()), 1, glm::value_ptr(lights[i].ambient));
+        glUniform3fv(glGetUniformLocation(shaderProgram, (base + ".diffuse").c_str()), 1, glm::value_ptr(lights[i].diffuse));
+        glUniform3fv(glGetUniformLocation(shaderProgram, (base + ".specular").c_str()), 1, glm::value_ptr(lights[i].specular));
+
+        glUniform1f(glGetUniformLocation(shaderProgram, (base + ".constant").c_str()), lights[i].constant);
+        glUniform1f(glGetUniformLocation(shaderProgram, (base + ".linear").c_str()), lights[i].linear);
+        glUniform1f(glGetUniformLocation(shaderProgram, (base + ".quadratic").c_str()), lights[i].quadratic);
+    }
 }
 
 // =====================================================================
@@ -402,9 +537,23 @@ int main()
     std::cout << "ESC - Wyjście\n" << std::endl;
     std::cout << "Aktywna kamera: OBSERWUJĄCA (statyczna)" << std::endl;
 
+    // ==================== Tworzenie świateł ====================
+    std::vector<Light> lights;
+
+    // Światło 1: Białe nad sceną (główne)
+    lights.push_back(Light(glm::vec3(0.0f, 8.0f, 0.0f), glm::vec3(1.0f, 1.0f, 1.0f)));
+
+    // Światło 2: Czerwone z boku
+    lights.push_back(Light(glm::vec3(5.0f, 3.0f, 5.0f), glm::vec3(1.0f, 0.3f, 0.3f)));
+
+    // Światło 3: Niebieskie z drugiego boku
+    lights.push_back(Light(glm::vec3(-5.0f, 3.0f, -5.0f), glm::vec3(0.3f, 0.3f, 1.0f)));
+
+    std::cout << "\nDodano " << lights.size() << " świateł punktowych" << std::endl;
+
     // ==================== Ustawienia OpenGL ====================
     glEnable(GL_DEPTH_TEST);
-    // Face culling wyłączony na razie - włączymy w Fazie 3 z poprawnymi normalami
+    // Face culling wyłączony na razie - włączymy później jeśli będzie potrzebny
     // glEnable(GL_CULL_FACE);
 
     // ==================== Pętla główna ====================
@@ -412,7 +561,7 @@ int main()
     {
         processInput(window);
 
-        glClearColor(0.1f, 0.15f, 0.2f, 1.0f);
+        glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glUseProgram(shaderProgram);
@@ -420,7 +569,6 @@ int main()
         float time = (float)glfwGetTime();
 
         // ==================== OBLICZANIE POZYCJI RUCHOMEGO OBIEKTU ====================
-        // (potrzebne dla kamer śledzącej i TPP)
         float radius = 4.0f;
         float speed = 0.5f;
         float movingX = radius * cos(time * speed);
@@ -433,41 +581,45 @@ int main()
 
         // ==================== MACIERZE ====================
 
+        // Pozycja kamery (potrzebna do speculara w Phongu)
+        glm::vec3 cameraPosition;
+
         // MACIERZ VIEW - w zależności od aktywnej kamery
         glm::mat4 view;
 
         if (activeCamera == 0)
         {
-            // KAMERA 0: Obserwująca - stała pozycja, patrzy na środek sceny
+            // KAMERA 0: Obserwująca
+            cameraPosition = glm::vec3(5.0f, 5.0f, 10.0f);
             view = glm::lookAt(
-                glm::vec3(5.0f, 5.0f, 10.0f),  // Pozycja kamery
-                glm::vec3(0.0f, 0.0f, 0.0f),   // Patrzy na środek
-                glm::vec3(0.0f, 1.0f, 0.0f)    // Góra
+                cameraPosition,
+                glm::vec3(0.0f, 0.0f, 0.0f),
+                glm::vec3(0.0f, 1.0f, 0.0f)
             );
         }
         else if (activeCamera == 1)
         {
-            // KAMERA 1: Śledząca - stała pozycja, patrzy na ruchomy obiekt
+            // KAMERA 1: Śledząca
+            cameraPosition = glm::vec3(8.0f, 6.0f, 8.0f);
             view = glm::lookAt(
-                glm::vec3(8.0f, 6.0f, 8.0f),   // Stała pozycja (z góry i z boku)
-                movingObjPosition,              // Patrzy na ruchomy obiekt
-                glm::vec3(0.0f, 1.0f, 0.0f)    // Góra
+                cameraPosition,
+                movingObjPosition,
+                glm::vec3(0.0f, 1.0f, 0.0f)
             );
         }
         else if (activeCamera == 2)
         {
-            // KAMERA 2: TPP (Third Person) - podąża za obiektem z tyłu
+            // KAMERA 2: TPP
             float cameraDistance = 3.0f;
             float cameraHeight = 2.0f;
 
-            // Pozycja kamery za obiektem (przeciwnie do kierunku ruchu)
-            glm::vec3 cameraPos = movingObjPosition - movingDirection * cameraDistance;
-            cameraPos.y += cameraHeight;
+            cameraPosition = movingObjPosition - movingDirection * cameraDistance;
+            cameraPosition.y += cameraHeight;
 
             view = glm::lookAt(
-                cameraPos,                      // Za obiektem i wyżej
-                movingObjPosition,              // Patrzy na obiekt
-                glm::vec3(0.0f, 1.0f, 0.0f)    // Góra
+                cameraPosition,
+                movingObjPosition,
+                glm::vec3(0.0f, 1.0f, 0.0f)
             );
         }
 
@@ -480,47 +632,65 @@ int main()
             0.1f, 100.0f
         );
 
-        // Przekazanie macierzy widoku i rzutowania (wspólne dla wszystkich obiektów)
+        // ==================== PRZEKAZANIE UNIFORMÓW ====================
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+        glUniform3fv(glGetUniformLocation(shaderProgram, "viewPos"), 1, glm::value_ptr(cameraPosition));
+
+        // Przekazanie świateł
+        setLights(shaderProgram, lights);
 
         // ==================== RYSOWANIE OBIEKTÓW ====================
 
-        // 1. PODŁOGA (statyczna)
+        // 1. PODŁOGA (statyczna) - matowa, szara
+        glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.8f);        // Dużo diffuse
+        glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.1f);        // Mało specular (matowa)
+        glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 8.0f); // Niski wykładnik
+
         glm::mat4 modelFloor = glm::mat4(1.0f);
         modelFloor = glm::translate(modelFloor, glm::vec3(0.0f, -2.0f, 0.0f));
         drawMesh(planeMesh, shaderProgram, modelFloor);
 
-        // 2. KULA (statyczna, gładki obiekt)
+        // 2. KULA (statyczna, gładki obiekt) - bardzo błyszcząca, jak metal
+        glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.6f);         // Średni diffuse
+        glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.9f);         // Dużo specular!
+        glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 128.0f); // Wysoki wykładnik (ostry odblask)
+
         glm::mat4 modelSphere = glm::mat4(1.0f);
-        modelSphere = glm::translate(modelSphere, glm::vec3(-2.0f, 0.5f, 2.0f));
-        modelSphere = glm::scale(modelSphere, glm::vec3(1.0f, 1.0f, 1.0f));
+        modelSphere = glm::translate(modelSphere, glm::vec3(-3.0f, 0.5f, 0.0f));
+        modelSphere = glm::scale(modelSphere, glm::vec3(1.5f, 1.5f, 1.5f));
         drawMesh(sphereMesh, shaderProgram, modelSphere);
 
-        // 3. SZEŚCIAN STATYCZNY #1
+        // 3. SZEŚCIAN STATYCZNY #1 - plastikowy
+        glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.7f);
+        glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.5f);
+        glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 32.0f);
+
         glm::mat4 modelCube1 = glm::mat4(1.0f);
-        modelCube1 = glm::translate(modelCube1, glm::vec3(2.0f, 1.0f, -2.0f));
+        modelCube1 = glm::translate(modelCube1, glm::vec3(3.0f, 0.5f, -2.0f));
         modelCube1 = glm::rotate(modelCube1, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
         drawMesh(cubeMesh, shaderProgram, modelCube1);
 
-        // 4. SZEŚCIAN STATYCZNY #2
+        // 4. SZEŚCIAN STATYCZNY #2 - gumowy (bardzo matowy)
+        glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.9f);        // Dużo diffuse
+        glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.05f);       // Prawie brak specular
+        glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 5.0f); // Bardzo niski (rozmazany)
+
         glm::mat4 modelCube2 = glm::mat4(1.0f);
-        modelCube2 = glm::translate(modelCube2, glm::vec3(3.0f, 0.5f, 3.0f));
+        modelCube2 = glm::translate(modelCube2, glm::vec3(0.0f, 0.5f, -4.0f));
         modelCube2 = glm::scale(modelCube2, glm::vec3(0.8f, 1.5f, 0.8f));
         drawMesh(cubeMesh, shaderProgram, modelCube2);
 
-        // 5. SZEŚCIAN RUCHOMY (przesuwanie + obroty)
+        // 5. SZEŚCIAN RUCHOMY - średnio błyszczący
+        glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.7f);
+        glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.6f);
+        glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 64.0f);
+
         glm::mat4 modelMoving = glm::mat4(1.0f);
-
-        // Używamy wcześniej obliczonej pozycji
         modelMoving = glm::translate(modelMoving, movingObjPosition);
-
-        // Obroty
         modelMoving = glm::rotate(modelMoving, time * 0.8f, glm::vec3(0.0f, 1.0f, 0.0f));
         modelMoving = glm::rotate(modelMoving, time * 0.5f, glm::vec3(1.0f, 0.0f, 0.0f));
-
         modelMoving = glm::scale(modelMoving, glm::vec3(0.7f, 0.7f, 0.7f));
-
         drawMesh(cubeMesh, shaderProgram, modelMoving);
 
         glfwSwapBuffers(window);
