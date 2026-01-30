@@ -182,6 +182,9 @@ uniform bool fogEnabled;
 uniform vec3 fogColor;
 uniform float fogDensity;
 
+uniform bool useClipPlane;
+uniform vec4 clipPlane;  // (A, B, C, D) : Ax + By + Cz + D = 0
+
 vec3 calculatePointLight(Light light, vec3 normal, vec3 fragPos, vec3 viewDir, vec3 objectColor)
 {
     vec3 lightDir = normalize(light.position - fragPos);
@@ -235,6 +238,13 @@ vec3 calculateSpotlight(Spotlight light, vec3 normal, vec3 fragPos, vec3 viewDir
 
 void main()
 {
+    if (useClipPlane)
+    {
+        float distance = -dot(vec4(FragPos, 1.0), clipPlane);
+        if (distance < 0.0)
+            discard;
+    }
+
     vec3 norm = normalize(Normal);
     vec3 viewDir = normalize(viewPos - FragPos);
     
@@ -970,6 +980,14 @@ int main()
             reflectionMatrix = glm::rotate(reflectionMatrix, -time * 0.8f, glm::vec3(0.0f, 1.0f, 0.0f));
             reflectionMatrix = glm::translate(reflectionMatrix, -movingObjPosition);
 
+            glm::vec3 mirrorNormal = glm::vec3(mirrorModel * glm::vec4(0.0f, 0.0f, 1.0f, 0.0f));
+            mirrorNormal = glm::normalize(mirrorNormal);
+            float d = -glm::dot(mirrorNormal, movingObjPosition);
+            glm::vec4 clipPlane(mirrorNormal.x, mirrorNormal.y, mirrorNormal.z, d);
+
+            glUniform1i(glGetUniformLocation(shaderProgram, "useClipPlane"), true);
+            glUniform4fv(glGetUniformLocation(shaderProgram, "clipPlane"), 1, glm::value_ptr(clipPlane));
+
             glCullFace(GL_FRONT);
             glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 1.0f);
 
@@ -997,6 +1015,8 @@ int main()
             drawMesh(cubeMesh, shaderProgram, glm::scale(mc2, glm::vec3(0.8f, 1.5f, 0.8f)));
 
             glCullFace(GL_BACK);
+
+            glUniform1i(glGetUniformLocation(shaderProgram, "useClipPlane"), false);
 
             // PASS 3: Rysowanie powierzchni lustra
             glStencilFunc(GL_EQUAL, 1, 0xFF);
@@ -1047,6 +1067,10 @@ int main()
     glDeleteVertexArrays(1, &sphereMesh.VAO);
     glDeleteBuffers(1, &sphereMesh.VBO);
     glDeleteBuffers(1, &sphereMesh.EBO);
+
+    glDeleteVertexArrays(1, &mirrorMesh.VAO);
+    glDeleteBuffers(1, &mirrorMesh.VBO);
+    glDeleteBuffers(1, &mirrorMesh.EBO);
 
     glDeleteProgram(shaderProgram);
 
