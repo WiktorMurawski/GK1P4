@@ -300,8 +300,8 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         else if (key == GLFW_KEY_UP) { spotlightPitch += 10.0f; }
         else if (key == GLFW_KEY_DOWN) { spotlightPitch -= 10.0f; }
         else if (key == GLFW_KEY_M) { fogEnabled = !fogEnabled; }
-        else if (key == GLFW_KEY_0) { fogDensity = std::max(0.0f, fogDensity - 0.01f); }
-        else if (key == GLFW_KEY_9) { fogDensity = std::min(0.5f, fogDensity + 0.01f); }
+        else if (key == GLFW_KEY_9) { fogDensity = std::max(0.0f, fogDensity - 0.01f); }
+        else if (key == GLFW_KEY_0) { fogDensity = std::min(0.5f, fogDensity + 0.01f); }
         else if (key == GLFW_KEY_L) { mirrorEnabled = !mirrorEnabled; std::cout << "Lustro: " << (mirrorEnabled ? "ON" : "OFF") << std::endl; }
     }
 }
@@ -356,8 +356,8 @@ Mesh createCube()
 {
     // Każda ściana ma 4 wierzchołki (pozycja XYZ, normalna XYZ, kolor RGB)
     float vertices[] = {
-        // Pozycja           Normalna          Kolor
-                // Przód (+Z) - czerwony
+        // Pozycja            Normalna             Kolor
+        // Przód (+Z) - czerwony
         -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 0.0f, 0.0f,
          0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 0.0f, 0.0f,
          0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 0.0f, 0.0f,
@@ -488,21 +488,28 @@ Mesh createMirror()
 
     Mesh mesh;
     mesh.indexCount = 6;
+
     glGenVertexArrays(1, &mesh.VAO);
     glGenBuffers(1, &mesh.VBO);
     glGenBuffers(1, &mesh.EBO);
+
     glBindVertexArray(mesh.VAO);
+
     glBindBuffer(GL_ARRAY_BUFFER, mesh.VBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(6 * sizeof(float)));
     glEnableVertexAttribArray(2);
+
     glBindVertexArray(0);
+
     return mesh;
 }
 
@@ -556,12 +563,10 @@ Mesh createSphere(int stacks = 30, int slices = 30)
             int first = i * (slices + 1) + j;
             int second = first + slices + 1;
 
-            // Pierwszy trójkąt
             indices.push_back(first);
             indices.push_back(first + 1);
             indices.push_back(second);
 
-            // Drugi trójkąt
             indices.push_back(second + 1);
             indices.push_back(second);
             indices.push_back(first + 1);
@@ -715,7 +720,7 @@ int main()
     // Światło 4: W środku sceny
     lights.push_back(Light(glm::vec3(0.0f, 0.1f, 0.0f), glm::vec3(0.3f, 0.3f, 0.3f)));
 
-    std::cout << "\nDodano " << lights.size() << " świateł punktowych" << std::endl;
+    std::cout << "\nDodano " << lights.size() << " światła punktowe" << std::endl;
 
 
     // ==================== Inicjalizacja reflektora ====================
@@ -734,7 +739,6 @@ int main()
 
         float time = (float)glfwGetTime();
 
-        // Kolor tła zmienia się z cyklem dzień/noc
         glm::vec3 skyColor;
 
         if (dayNightCycleEnabled)
@@ -768,7 +772,7 @@ int main()
         float movingY = 0.0f;
         glm::vec3 movingObjPosition(movingX, movingY, movingZ);
 
-        // Kierunek ruchu obiektu (do kamery TPP)
+        // Kierunek ruchu obiektu (do TPP)
         glm::vec3 movingDirection = glm::normalize(glm::vec3(-sin(time * speed), 0.0f, cos(time * speed)));
 
         // ==================== MACIERZE ====================
@@ -869,10 +873,10 @@ int main()
         glUniform3fv(glGetUniformLocation(shaderProgram, "globalAmbient"), 1, glm::value_ptr(globalAmbient));
 
         // ==================== AKTUALIZACJA REFLEKTORA ====================
-        // Reflektor jest umieszczony na ruchomym obiekcie
+        // Reflektor umieszczony na ruchomym obiekcie
         spotlight.position = movingObjPosition;
 
-        // Oblicz kierunek reflektora na podstawie yaw i pitch
+        // Kierunek reflektora na podstawie yaw i pitch
         glm::vec3 direction;
         direction.x = cos(glm::radians(spotlightYaw)) * cos(glm::radians(spotlightPitch));
         direction.y = sin(glm::radians(spotlightPitch));
@@ -896,11 +900,10 @@ int main()
         // Macierz lustra
         glm::mat4 mirrorModel = glm::translate(glm::mat4(1.0f), movingObjPosition);
         mirrorModel = glm::rotate(mirrorModel, time * 0.8f, glm::vec3(0.0f, 1.0f, 0.0f));
-        mirrorModel = glm::scale(mirrorModel, glm::vec3(1.5f, 1.5f, 0.1f));
+        mirrorModel = glm::scale(mirrorModel, glm::vec3(2.5f, 2.5f, 0.1f));
 
-        // ====== FIRST: Draw the normal scene (everything EXCEPT the moving cube) ======
         glStencilFunc(GL_ALWAYS, 0, 0xFF);
-        glStencilMask(0x00);  // Don't write to stencil
+        glStencilMask(0x00);
         glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 1.0f);
 
         // 1. PODŁOGA (statyczna)
@@ -942,10 +945,9 @@ int main()
         modelCube2 = glm::scale(modelCube2, glm::vec3(0.8f, 1.5f, 0.8f));
         drawMesh(cubeMesh, shaderProgram, modelCube2);
 
-        // ====== NOW: Handle the mirror (if enabled) ======
         if (mirrorEnabled)
         {
-            // PASS 1: Mark stencil where mirror is
+            // PASS 1: Ustawienie stencil na 1 w obszarze lustra
             glStencilFunc(GL_ALWAYS, 1, 0xFF);
             glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
             glStencilMask(0xFF);
@@ -955,7 +957,7 @@ int main()
             glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 1.0f);
             drawMesh(mirrorMesh, shaderProgram, mirrorModel);
 
-            // PASS 2: Draw reflection where stencil == 1
+            // PASS 2: Rysowanie odbić gdzie stencil == 1
             glStencilFunc(GL_EQUAL, 1, 0xFF);
             glStencilMask(0x00);
             glDepthMask(GL_TRUE);
@@ -996,9 +998,9 @@ int main()
 
             glCullFace(GL_BACK);
 
-            // PASS 3: Draw mirror surface (with blending)
-            glStencilFunc(GL_EQUAL, 1, 0xFF);  // Only draw where stencil == 1
-            glStencilMask(0x00);  // Don't modify stencil anymore
+            // PASS 3: Rysowanie powierzchni lustra
+            glStencilFunc(GL_EQUAL, 1, 0xFF);
+            glStencilMask(0x00);
 
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1012,15 +1014,15 @@ int main()
             glDisable(GL_BLEND);
         }
 
-        // ====== FINALLY: Draw the moving cube (which has the mirror on it) ======
         glStencilFunc(GL_ALWAYS, 0, 0xFF);
         glStencilMask(0x00);
         glDepthMask(GL_TRUE);
-        glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 1.0f);
 
+        // Ruchomy sześcian
         glUniform1f(glGetUniformLocation(shaderProgram, "kd"), 0.7f);
         glUniform1f(glGetUniformLocation(shaderProgram, "ks"), 0.6f);
         glUniform1f(glGetUniformLocation(shaderProgram, "shininess"), 64.0f);
+        glUniform1f(glGetUniformLocation(shaderProgram, "alpha"), 1.0f);
 
         glm::mat4 modelMoving = glm::mat4(1.0f);
         modelMoving = glm::translate(modelMoving, movingObjPosition);
